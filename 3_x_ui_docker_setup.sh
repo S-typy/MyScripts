@@ -9,12 +9,15 @@ DOMAIN="mybest.duckdns.org"
 CERT_DIR="$WORK_DIR/cert"
 CERT_FILE="$CERT_DIR/fullchain.pem"
 KEY_FILE="$CERT_DIR/privkey.pem"
+CONTAINER_CERT_FILE="/root/cert/fullchain.pem"
+CONTAINER_KEY_FILE="/root/cert/privkey.pem"
 
 # === 0. Установка зависимостей (curl, certbot, docker, docker-compose, ufw) ===
 echo "[0/10] Устанавливаю зависимости (curl, certbot, docker, docker-compose, ufw)"
 sudo apt update
-sudo apt install -y curl certbot ufw apt-transport-https ca-certificates software-properties-common openssl
+sudo apt install -y curl certbot ufw apt-transport-https ca-certificates software-properties-common openssl sqlite3
 WEB_BASE_PATH="/xui-dash-$(openssl rand -hex 4)"
+WEB_BASE_PATH_DB="${WEB_BASE_PATH%/}/"
 
 # Установка Docker
 if ! command -v docker &> /dev/null; then
@@ -84,8 +87,8 @@ services:
       - XRAY_VMESS_AEAD_FORCED=false
       - PANEL_PORT=$PANEL_PORT
       - WEB_BASE_PATH=$WEB_BASE_PATH
-      - SSL_CERTIFICATE=$CERT_FILE
-      - SSL_CERTIFICATE_KEY=$KEY_FILE
+      - SSL_CERTIFICATE=$CONTAINER_CERT_FILE
+      - SSL_CERTIFICATE_KEY=$CONTAINER_KEY_FILE
 EOF
 
 # === 6. Запуск Docker контейнера ===
@@ -93,6 +96,28 @@ echo "[6/10] Запускаю контейнер 3x-ui"
 cd $WORK_DIR
 sudo -u $USER_NAME docker compose down || true
 sudo -u $USER_NAME docker compose up -d
+sleep 10
+echo "[6/10] Настраиваю параметры панели"
+DB_PATH="$WORK_DIR/config/x-ui.db"
+for attempt in {1..12}; do
+  if [ -f "$DB_PATH" ]; then
+    break
+  fi
+  sleep 5
+done
+if [ ! -f "$DB_PATH" ]; then
+  echo "Не удалось найти базу настроек x-ui (ожидалась $DB_PATH)"
+  exit 1
+fi
+sudo sqlite3 "$DB_PATH" <<SQL
+DELETE FROM settings WHERE key IN ('webDomain', 'webPort', 'webCertFile', 'webKeyFile', 'webBasePath');
+INSERT INTO settings (key,value) VALUES ('webDomain', '${DOMAIN}');
+INSERT INTO settings (key,value) VALUES ('webPort', '${PANEL_PORT}');
+INSERT INTO settings (key,value) VALUES ('webCertFile', '${CONTAINER_CERT_FILE}');
+INSERT INTO settings (key,value) VALUES ('webKeyFile', '${CONTAINER_KEY_FILE}');
+INSERT INTO settings (key,value) VALUES ('webBasePath', '${WEB_BASE_PATH_DB}');
+SQL
+sudo -u $USER_NAME docker compose restart 3x-ui
 sleep 10
 
 # === 7. Проверка доступности панели ===
