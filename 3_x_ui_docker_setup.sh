@@ -9,12 +9,12 @@ DOMAIN="mybest.duckdns.org"
 CERT_DIR="$WORK_DIR/cert"
 CERT_FILE="$CERT_DIR/fullchain.pem"
 KEY_FILE="$CERT_DIR/privkey.pem"
-WEB_BASE_PATH="/xui-dash-$(openssl rand -hex 4)"
 
 # === 0. Установка зависимостей (curl, certbot, docker, docker-compose, ufw) ===
 echo "[0/10] Устанавливаю зависимости (curl, certbot, docker, docker-compose, ufw)"
 sudo apt update
-sudo apt install -y curl certbot ufw apt-transport-https ca-certificates software-properties-common
+sudo apt install -y curl certbot ufw apt-transport-https ca-certificates software-properties-common openssl
+WEB_BASE_PATH="/xui-dash-$(openssl rand -hex 4)"
 
 # Установка Docker
 if ! command -v docker &> /dev/null; then
@@ -107,7 +107,9 @@ fi
 # === 8. Добавление cron задачи для обновления сертификата ===
 echo "[8/10] Добавляю cron задачу для продления сертификатов и рестарта контейнера"
 CRON_CMD="0 3 * * * certbot renew --quiet && docker restart 3x-ui"
-( sudo crontab -l 2>/dev/null | grep -F "$CRON_CMD" ) || ( sudo crontab -l 2>/dev/null; echo "$CRON_CMD" ) | sudo crontab -
+if ! sudo crontab -l 2>/dev/null | grep -Fq "$CRON_CMD"; then
+  (sudo crontab -l 2>/dev/null || true; echo "$CRON_CMD") | sudo crontab -
+fi
 
 # === 9. Информация пользователю ===
 echo "[9/10] Готово!"
